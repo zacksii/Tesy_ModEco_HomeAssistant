@@ -3,7 +3,7 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import UnitOfEnergy, UnitOfPower, UnitOfVolume
 from datetime import datetime
-from .const import DOMAIN, SCHEDULE_ENDPOINTS, TESY_DEVICE_TYPES, ATTR_CURRENT_TEMP, ATTR_TARGET_TEMP, ATTR_TIME_ZONE, ATTR_DATE_TIME
+from .const import DOMAIN, SCHEDULE_ENDPOINTS, TESY_DEVICE_TYPES, ATTR_CURRENT_TEMP, ATTR_TARGET_TEMP, ATTR_TIME_ZONE, ATTR_DATE_TIME, ATTR_MODE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,21 +30,21 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
         # Define all sensors
         sensors = [
-            TesySensor(coordinator, api_url, device_id, device_name, "heater_state", endpoint="status", unit=None, icon=None),
-            TesySensor(coordinator, api_url, device_id, device_name, "mode", endpoint="status", unit=None, icon=None),
+            TesySensor(coordinator, api_url, device_id, device_name, "heater_state", endpoint="status", unit=None, icon="mdi:radiator"),
+            TesySensor(coordinator, api_url, device_id, device_name, ATTR_MODE, endpoint="status", unit=None, icon="mdi:settings"),
             TesySensor(coordinator, api_url, device_id, device_name, "err_flag", endpoint="status", unit=None, icon="mdi:alert"),
             TesySensor(coordinator, api_url, device_id, device_name, "lockB", endpoint="status", unit=None, icon="mdi:lock"),
             TesySensor(coordinator, api_url, device_id, device_name, "boost", endpoint="status", unit=None, icon="mdi:rocket"),
-            TesySensor(coordinator, api_url, device_id, device_name, "watts", endpoint="status", unit=UnitOfPower.WATT, icon="mdi:flash"),
+            TesySensor(coordinator, api_url, device_id, device_name, "watts", endpoint="status", unit=UnitOfPower.WATT, icon="mdi:power-plug"),
             TesySensor(coordinator, api_url, device_id, device_name, ATTR_CURRENT_TEMP, endpoint="status", unit="°C", icon="mdi:thermometer"),
-            TesySensor(coordinator, api_url, device_id, device_name, ATTR_TARGET_TEMP, endpoint="status", unit="°C", icon="mdi:thermometer"),
+            TesySensor(coordinator, api_url, device_id, device_name, ATTR_TARGET_TEMP, endpoint="status", unit="°C", icon="mdi:thermometer-plus"),
             TesySensor(coordinator, api_url, device_id, device_name, "mix40", endpoint="status", unit=UnitOfVolume.LITERS, icon="mdi:water"),
             TesySensor(coordinator, api_url, device_id, device_name, ATTR_DATE_TIME, endpoint="status", unit=None, icon="mdi:calendar"),
-            TesySensor(coordinator, api_url, device_id, device_name, ATTR_TIME_ZONE, endpoint="status", unit=None, icon=None),
+            TesySensor(coordinator, api_url, device_id, device_name, ATTR_TIME_ZONE, endpoint="status", unit=None, icon="mdi:clock"),
             TesySensor(coordinator, api_url, device_id, device_name, "sum", endpoint="calcRes", unit=UnitOfEnergy.WATT_HOUR, icon="mdi:chart-bar"),
             TesySensor(coordinator, api_url, device_id, device_name, "resetDate", endpoint="calcRes", unit=None, icon="mdi:calendar-refresh"),
             TesySensor(coordinator, api_url, device_id, device_name, "volume", endpoint="calcRes", unit=UnitOfVolume.LITERS, icon="mdi:water"),
-            TesySensor(coordinator, api_url, device_id, device_name, "watt", endpoint="calcRes", unit=UnitOfPower.WATT, icon="mdi:power"),
+            TesySensor(coordinator, api_url, device_id, device_name, "watt", endpoint="calcRes", unit=UnitOfPower.WATT, icon="mdi:flash"),
             TesyEnergySensor(coordinator, api_url, device_id, device_name),
         ]
 
@@ -77,20 +77,20 @@ class TesySensor(CoordinatorEntity, SensorEntity):
         # Define custom mappings for user-friendly names
         self._key_name_mapping = {
             "heater_state": "Heater State",
-            "mode": "Mode",
+            ATTR_MODE: "Operating Mode",
             "err_flag": "Error Flag",
             "lockB": "Child Lock Status",
             "boost": "Boost Mode",
-            "watts": "Power Consumption",
-            "gradus": "Current Temperature",
-            "ref_gradus": "Target Temperature",
-            "mix40": "Mix 40L",
-            "sum": "Total Energy",
-            "resetDate": "Reset Date",
+            "watts": "Power Consumption (Watts)",
+            ATTR_CURRENT_TEMP: "Current Temperature",
+            ATTR_TARGET_TEMP: "Target Temperature",
+            "mix40": "Water Mix at 40°C",
+            "sum": "Total Energy Usage",
+            "resetDate": "Reset Date of Energy Usage",
             "volume": "Water Volume",
             "watt": "Current Power",
-            "tz" : "Time Zone",
-            "date" : "Date/Time",            
+            ATTR_TIME_ZONE: "Time Zone",
+            ATTR_DATE_TIME: "Date/Time",            
         }
 
     @property
@@ -179,7 +179,6 @@ class TesyScheduleSensor(CoordinatorEntity, SensorEntity):
         self._schedule_type = schedule_type
         self._endpoint = endpoint
 
-        # Human-readable mapping of schedule types
         schedule_type_mapping = {
             "p1": "Program 1",
             "p2": "Program 2",
@@ -193,20 +192,39 @@ class TesyScheduleSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Return the temperature for the current hour from the schedule."""
         current_hour = datetime.now().hour
-        schedule_data = self.coordinator.data.get(self._schedule_type, [])
+        schedule_data = self.coordinator.data.get(self._schedule_type, None)
 
         if not schedule_data:
-            return "No schedule available"
+            _LOGGER.warning("No schedule data available for type: %s", self._schedule_type)
+            return None
+            
+        if self._schedule_type == "vacation":
+            # Handle vacation schedule format
+            try:
+                vacation_temp = schedule_data.get("vTemp")
+                return vacation_temp
+            except (AttributeError, KeyError) as e:
+                _LOGGER.error(
+                    "Error retrieving vacation temperature from schedule data: %s. Error: %s",
+                    schedule_data,
+                    e,
+                )
+                return None
+            
+        if not isinstance(schedule_data, list) or len(schedule_data) < 1:
+            _LOGGER.error("Invalid schedule data format for type: %s. Data: %s", self._schedule_type, schedule_data)
+            return None
 
-        current_day = datetime.now().strftime('%a')  # Get the current day in short form (e.g., Mon, Tue, etc.)
-
-        for day_schedule in schedule_data:
-            if current_day in day_schedule:
-                current_day_schedule = day_schedule[current_day]
-                current_temp = current_day_schedule.get(f"h{current_hour:02}", "Unknown")
-                return current_temp
-
-        return "No schedule available"
+        try:
+            current_temp = schedule_data[0].get(f"h{current_hour:02d}")
+            return current_temp
+        except (IndexError, AttributeError) as e:
+            _LOGGER.error(
+                "Error retrieving temperature for current hour from schedule data: %s. Error: %s",
+                schedule_data,
+                e,
+            )
+            return None
 
     @property
     def extra_state_attributes(self):
