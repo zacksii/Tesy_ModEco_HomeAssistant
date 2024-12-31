@@ -25,11 +25,7 @@ This is a custom integration for Home Assistant that allows you to control Tesy 
 
 ### HACS Installation
 
-1.Add this repo as a "Custom repository" with type "Integration"
-2. Click "Install" in the new "Tesy" card in HACS.
-3. Install
-4. Restart Home Assistant
-5. Click Add Integration and choose "Tesy ModEco Water Heater". Follow the configuration flow
+Coming soon!
 
 ## Configuration
 
