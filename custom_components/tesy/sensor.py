@@ -41,7 +41,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             TesySensor(coordinator, api_url, device_id, device_name, "mix40", endpoint="status", unit=UnitOfVolume.LITERS, icon="mdi:water"),
             TesySensor(coordinator, api_url, device_id, device_name, ATTR_DATE_TIME, endpoint="status", unit=None, icon="mdi:calendar"),
             TesySensor(coordinator, api_url, device_id, device_name, ATTR_TIME_ZONE, endpoint="status", unit=None, icon="mdi:clock"),
-            TesySensor(coordinator, api_url, device_id, device_name, "sum", endpoint="calcRes", unit=UnitOfEnergy.WATT_HOUR, icon="mdi:chart-bar"),
             TesySensor(coordinator, api_url, device_id, device_name, "resetDate", endpoint="calcRes", unit=None, icon="mdi:calendar-refresh"),
             TesySensor(coordinator, api_url, device_id, device_name, "volume", endpoint="calcRes", unit=UnitOfVolume.LITERS, icon="mdi:water"),
             TesySensor(coordinator, api_url, device_id, device_name, "watt", endpoint="calcRes", unit=UnitOfPower.WATT, icon="mdi:flash"),
@@ -57,7 +56,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         async_add_entities(sensors)
     except Exception as e:
         _LOGGER.error("Error setting up Tesy sensors: %s", e, exc_info=True)
-
 
 class TesySensor(CoordinatorEntity, SensorEntity):
     """Representation of a Tesy sensor."""
@@ -85,7 +83,6 @@ class TesySensor(CoordinatorEntity, SensorEntity):
             ATTR_CURRENT_TEMP: "Current Temperature",
             ATTR_TARGET_TEMP: "Target Temperature",
             "mix40": "Water Mix at 40°C",
-            "sum": "Total Energy Usage",
             "resetDate": "Reset Date of Energy Usage",
             "volume": "Water Volume",
             "watt": "Current Power",
@@ -142,18 +139,37 @@ class TesyEnergySensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Return the current energy consumption."""
+        """Return the current energy consumption in Wh."""
         calc_res = self.coordinator.data.get("calcRes", {})
-        energy = calc_res.get("sum")
-        if energy is not None:
+    
+        # Retrieve 'sum' (total energy in Joules) and 'watt' (power in Watts) from calcRes
+        total_energy_usage = calc_res.get("sum")
+        watt = calc_res.get("watt")
+    
+        try:
+            # Convert both values to numeric types if they are not already
+            total_energy_usage = float(total_energy_usage) if total_energy_usage is not None else None
+            watt = float(watt) if watt is not None else None
+        except ValueError as e:
+            _LOGGER.error("Failed to convert energy data to numeric values. Error: %s", e)
+            return None
+    
+        if total_energy_usage is not None and watt is not None:
             try:
+                # Convert Joules to Wh, then multiply by power
+                energy = (total_energy_usage / 3600) * watt
                 return int(energy)
-            except ValueError:
-                _LOGGER.error("Invalid energy value: %s", energy)
+            except (ValueError, TypeError) as e:
+                _LOGGER.error("Invalid energy calculation. Error: %s", e)
                 return None
-        _LOGGER.warning("Energy consumption data not available.")
-        return None
-
+        else:
+            _LOGGER.warning(
+                "Energy consumption data is incomplete. 'sum': %s, 'watt': %s",
+                total_energy_usage,
+                watt,
+            )
+            return None
+            
     @property
     def extra_state_attributes(self):
         """Return extra attributes for the energy sensor."""
